@@ -1,0 +1,11 @@
+{
+  "pod_name": "checkout-worker-5b85486f4d-tjk8m",
+  "namespace": "shop",
+  "status": "Pending",
+  "events": [
+    {
+      "reason": "Failed",
+      "message": "Failed to pull image \"registry.example.com/shop/checkout-worker:v2\": unauthorized"
+    }
+  ]
+}

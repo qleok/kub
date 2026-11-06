@@ -1,0 +1,13 @@
+{
+  "pod_name": "invoice-worker-7cbf88b794-h7m6s",
+  "namespace": "billing",
+  "status": "CrashLoopBackOff",
+  "container_reason": "OOMKilled",
+  "events": [
+    {
+      "reason": "BackOff",
+      "message": "Back-off restarting failed container invoice-worker"
+    }
+  ],
+  "description": "The invoice worker restarted while processing a large batch."
+}

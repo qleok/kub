@@ -1,0 +1,14 @@
+{
+  "pod_name": "checkout-api-76bf9d5c8c-2jr8w",
+  "namespace": "shop",
+  "status": "CrashLoopBackOff",
+  "events": [
+    {
+      "reason": "BackOff",
+      "message": "Back-off restarting failed container checkout-api"
+    }
+  ],
+  "logs": [
+    "ERROR: required environment variable CHECKOUT_CONFIG_PATH is missing"
+  ]
+}
