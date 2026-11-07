@@ -2,7 +2,7 @@
 
 **An AI-Powered Kubernetes Incident Diagnosis Assistant**
 
-K8s Incident Copilot helps triage Kubernetes Pod failures from the status, events, and logs you provide. Phase 1 is a local FastAPI MVP that uses deterministic rules to suggest a likely cause, show what triggered the diagnosis, and recommend what to check next. The service makes no external calls at runtime. You can try every example without a Kubernetes cluster, kubeconfig, or API key.
+K8s Incident Copilot helps triage Kubernetes Pod failures from the status, events, and logs you provide. The FastAPI service uses deterministic rules to suggest a likely cause and show what triggered the diagnosis. An optional retrieval mode adds troubleshooting guidance from a bundled Kubernetes knowledge base. You can run every example offline without a cluster, kubeconfig, or API key.
 
 | Supported failure | What it signals | Kubernetes documentation |
 | --- | --- | --- |
@@ -52,6 +52,8 @@ The health endpoint returns `{"status":"ok"}`. The example request returns a dia
 
 `POST /api/v1/diagnose` accepts a normalized JSON object. Supply observations for the container you are investigating.
 
+Use `?mode=rules` for the Phase 1 baseline or `?mode=rag` to retrieve and apply documentation. Omitting `mode` uses rules. Unsupported mode values return HTTP `422`.
+
 | Field | Value |
 | --- | --- |
 | `pod_name`, `namespace` | Optional strings that identify the Pod. |
@@ -67,17 +69,39 @@ The rules use the highest priority source with a recognized signal: `container_r
 
 | Response field | Meaning |
 | --- | --- |
-| `incident_id` | UUID generated for the response. Phase 1 does not persist IDs or provide a lookup endpoint. |
+| `incident_id` | UUID for this response. Reports are returned synchronously and are not stored. |
 | `status` | `diagnosed` or `insufficient_evidence`. |
 | `failure_type` | One of the three canonical labels above, or `null` if the rules cannot select a failure type. |
 | `suspected_cause` | A likely explanation based on the observations, or `null` if evidence is insufficient. |
 | `severity` | `high`, `medium`, or `unknown`. This is a rule-based estimate of the observed failure, not a measure of workload impact. |
 | `evidence` | Array of strings naming the matched signals and where they appeared. |
 | `recommended_steps` | Array of suggested checks to confirm the cause or gather more evidence. |
-| `references` | Array of `{ "title": "...", "url": "..." }` objects linking to official Kubernetes documentation. These links are built into the service. |
-| `diagnosis_method` | `rules`. |
+| `references` | In rules mode, each reference has `title` and `url`. Retrieved references also have `chunk_id`, `excerpt`, and `recommended_step`. |
+| `diagnosis_method` | `rules+rag` when retrieved guidance is applied, or `rules` otherwise. |
 
-Phase 1 evaluates only the observations in the request. It does not fetch logs or events, call a language model, retrieve documentation, or modify a cluster. Free text is checked for explicit Kubernetes markers, so it cannot establish whether a marker is negated or historical. The suggested cause is a starting point for investigation; the same failure type can have multiple underlying causes. Use synthetic or sanitized data with the local demo. See [Debug Pods](https://kubernetes.io/docs/tasks/debug/debug-application/debug-pods/) for how to gather more evidence.
+The service evaluates the observations supplied in the request. Free text is checked for explicit Kubernetes markers, so it cannot establish whether a marker is negated or historical. The suggested cause is a starting point for investigation. Use synthetic or sanitized data with the local demo. For ways to gather observations, see [Debug Pods](https://kubernetes.io/docs/tasks/debug/debug-application/debug-pods/).
+
+## Local retrieval and comparison
+
+The [knowledge base](src/k8s_incident_copilot/knowledge/) contains short paraphrases of official Kubernetes documentation. Each Markdown heading defines a passage with a source section and a recommended action. The service reads the bundled files, filters passages by the rule diagnosis, and ranks matching terms from the submitted observations using inverse document frequency. Rare terms such as `unauthorized` can surface narrower guidance than a generic failure marker. The diagnosis itself remains the same.
+
+The report uses up to two passages. The overview of the diagnosed failure can fill in when the observations contain little detail. Each citation links to the official section, identifies the local passage by its `chunk_id`, and includes the exact `recommended_step` it contributed. The service assembles the report locally from these passages and deterministic rules. If the rules cannot identify a supported failure or retrieval has no match, the endpoint returns the rules report. Ranking depends on overlapping words in the small English corpus.
+
+With Uvicorn running, send the same three sample incidents through both modes. The script prints the diagnosis and references for each mode, along with the retrieved recommendations.
+
+```powershell
+.venv\Scripts\python.exe scripts/compare_modes.py
+```
+
+On macOS or Linux, use `.venv/bin/python scripts/compare_modes.py`.
+
+In the bundled comparison, both modes classified all three examples the same way. Rules returned a general reference for each diagnosis. Retrieval returned two cited actions per example.
+
+| Example | Guidance added by retrieval |
+| --- | --- |
+| `CrashLoopBackOff` | Inspect the last container state and fetch previous logs with `kubectl logs --previous`. |
+| `ImagePullBackOff` | For the `unauthorized` pull, verify the registry Secret in the Pod namespace and read the pull event. |
+| `OOMKilled` | Compare container memory usage with its limit and check the last termination reason. |
 
 ## Development
 
@@ -87,7 +111,10 @@ src/k8s_incident_copilot/
   main.py       FastAPI routes
   schemas.py    Request and response models
   diagnosis.py  Diagnosis rules and recommendations
+  retrieval.py  Markdown loader, ranking, and report enrichment
+  knowledge/    Bundled Kubernetes documentation summaries
 examples/       JSON requests for the three supported failures
+scripts/        Rules vs. retrieval comparison
 tests/          Automated tests
 ```
 

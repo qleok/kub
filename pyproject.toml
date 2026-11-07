@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "k8s-incident-copilot"
-version = "0.1.0"
-description = "An AI-powered Kubernetes incident diagnosis assistant, starting with local rules."
+version = "0.2.0"
+description = "Local Kubernetes incident diagnosis with optional Kubernetes documentation retrieval."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -26,6 +26,9 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+k8s_incident_copilot = ["knowledge/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

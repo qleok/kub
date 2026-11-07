@@ -60,6 +60,14 @@ class Reference(BaseModel):
     url: AnyHttpUrl
 
 
+class RetrievedReference(Reference):
+    model_config = ConfigDict(frozen=True)
+
+    chunk_id: str
+    excerpt: str
+    recommended_step: str
+
+
 class DiagnosisReport(BaseModel):
     incident_id: UUID
     status: Literal["diagnosed", "insufficient_evidence"]
@@ -68,8 +76,8 @@ class DiagnosisReport(BaseModel):
     severity: Severity
     evidence: list[str]
     recommended_steps: list[str]
-    references: list[Reference]
-    diagnosis_method: Literal["rules"] = "rules"
+    references: list[RetrievedReference | Reference]
+    diagnosis_method: Literal["rules", "rules+rag"] = "rules"
 
 
 class HealthResponse(BaseModel):
