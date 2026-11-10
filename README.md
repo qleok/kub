@@ -2,7 +2,7 @@
 
 **An AI-Powered Kubernetes Incident Diagnosis Assistant**
 
-K8s Incident Copilot helps triage Kubernetes Pod failures from the status, events, and logs you provide. The FastAPI service uses deterministic rules to suggest a likely cause and show what triggered the diagnosis. Retrieval mode adds guidance from bundled Kubernetes documentation. Agent mode coordinates those same local tools and can optionally ask a model to prioritize the recommended steps. You can run all three modes offline without a cluster, kubeconfig, or API key.
+K8s Incident Copilot helps triage Kubernetes Pod failures from the status, events, and logs you provide. The FastAPI service uses deterministic rules to suggest a likely cause and show what triggered the diagnosis. Retrieval mode adds guidance from bundled Kubernetes documentation. Agent mode coordinates those same local tools and can optionally ask a model to prioritize the recommended steps. You can run all three modes offline without a cluster, kubeconfig, or API key. An opt-in endpoint can also read live observations for a Pod in one configured namespace.
 
 | Supported failure | What it signals | Kubernetes documentation |
 | --- | --- | --- |
@@ -12,7 +12,7 @@ K8s Incident Copilot helps triage Kubernetes Pod failures from the status, event
 
 ## Run locally
 
-From the repository root, create a virtual environment and start the API. No environment variables are required for local diagnosis. If you are upgrading an existing checkout, rerun the editable install to add the agent's runtime dependencies.
+From the repository root, create a virtual environment and start the API. No environment variables are required for local diagnosis. If you are upgrading an existing checkout, rerun the editable install to update its runtime dependencies.
 
 **Windows PowerShell** (with Python 3.13 installed):
 
@@ -173,6 +173,57 @@ Agent mode sends an HTTP Chat Completions request to `/chat/completions` under t
 
 The model receives the failure type, severity, and numbered recommendations. The raw incident payload and citations stay with the local service. The model returns one to three distinct indices starting at 1, for example `{"priority_steps":[1,2]}`. The API resolves these indices to step strings and leaves the full `recommended_steps` list in the response. The adapter accepts uncompressed response bodies up to 64 KiB. Invalid responses preserve the local report and set `model_status` to `invalid_response`.
 
+## Diagnose a live Pod
+
+`POST /api/v1/diagnose/pod` collects observations and returns an agent report. Set `KIC_K8S_NAMESPACE` to the one namespace the API may read. Leaving it unset disables the live endpoint, which returns HTTP `503`. Requests naming a different namespace return HTTP `403` before contacting Kubernetes. The client treats upstream redirects as failed reads.
+
+### Connect to Kubernetes
+
+**From a local machine**, set `KIC_K8S_KUBECONFIG` to an explicit kubeconfig path, even if the file you intend to use is `~/.kube/config`. Use a dedicated static token or client certificate with the namespace-scoped permissions shown below. The application rejects kubeconfig `exec` and `auth-provider` plugins. Set `KIC_K8S_CONTEXT` to select a context from that file, or leave it unset to use the file's current context. The request scope always comes from `KIC_K8S_NAMESPACE`. [Configure access to multiple clusters](https://kubernetes.io/docs/tasks/access-application-cluster/configure-access-multiple-clusters/)
+
+Set the variables in the same shell you use to start Uvicorn. Replace the example path and context with your own values.
+
+```powershell
+$env:KIC_K8S_NAMESPACE = 'incident-demo'
+$env:KIC_K8S_KUBECONFIG = 'C:\path\to\incident-reader.kubeconfig'
+$env:KIC_K8S_CONTEXT = 'incident-reader'
+```
+
+```sh
+export KIC_K8S_NAMESPACE='incident-demo'
+export KIC_K8S_KUBECONFIG='/path/to/incident-reader.kubeconfig'
+export KIC_K8S_CONTEXT='incident-reader'
+```
+
+**From inside a cluster**, leave `KIC_K8S_KUBECONFIG` and `KIC_K8S_CONTEXT` unset to use the Pod's mounted service account credentials. The [example RBAC manifest](deploy/kubernetes/rbac.yaml) grants `get` on core `pods` and `pods/log` and `list` on core `events`, all in `incident-demo`. Ensure the namespace exists before applying the manifest. [Accessing the Kubernetes API from a Pod](https://kubernetes.io/docs/tasks/run-application/access-api-from-pod/) · [Kubernetes RBAC](https://kubernetes.io/docs/reference/access-authn-authz/rbac/)
+
+```sh
+# Run this first if the namespace does not exist.
+kubectl create namespace incident-demo
+kubectl apply -f deploy/kubernetes/rbac.yaml
+```
+
+Run the application Pod in `incident-demo` with `spec.serviceAccountName: k8s-incident-copilot` and set `KIC_K8S_NAMESPACE=incident-demo` in the API process. To use a different namespace, change it throughout the manifest and use the same name in the API configuration. [Configure service accounts for Pods](https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/)
+
+### Request a diagnosis
+
+The request requires `namespace` and `pod_name`. In [the interactive API docs](http://127.0.0.1:8000/docs), send the following body to `POST /api/v1/diagnose/pod` and replace `example-pod` with a Pod in the configured namespace.
+
+```json
+{
+  "namespace": "incident-demo",
+  "pod_name": "example-pod"
+}
+```
+
+If the Pod has one regular container, the API can select it automatically. Otherwise supply `container_name`. An explicit name can select a regular container or an init container.
+
+The service reads the Pod once, collects up to 50 events for that Pod's UID, and fetches up to 50 lines and 16 KiB of logs for the selected container. It requests logs from the previous instance for a restarted container in `CrashLoopBackOff` or a running container whose last termination was `OOMKilled`. In the latter case, the diagnosis describes the last termination of a container that is now running. The service redacts event and log text before using it for local retrieval. The Pod and container state determine the classification. If model prioritization is enabled, it receives only the failure type, severity, and recommendations assembled by the service.
+
+The response adds a `kubernetes` object to the agent report. It contains `namespace`, `pod_name`, `container_name`, `events_status`, and `logs_status`. Each collection status is `ok` or `unavailable`. The report can still use the Pod state if events or logs are unavailable.
+
+Redaction is best effort. The API has no built-in authentication and is intended for trusted operators on a trusted network.
+
 ## Development
 
 ```text
@@ -184,7 +235,10 @@ src/k8s_incident_copilot/
   retrieval.py  Markdown loader, ranking, and report enrichment
   agent.py      LangGraph workflow for agent mode
   llm.py        Optional model client for step prioritization
+  kubernetes_snapshot.py  Namespaced Pod, Event, and log collection
+  redaction.py  Redaction for live events and logs
   knowledge/    Bundled Kubernetes documentation summaries
+deploy/         Example Kubernetes permissions
 examples/       JSON requests for the three supported failures
 scripts/        Rules vs. retrieval comparison
 tests/          Automated tests

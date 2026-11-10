@@ -3,7 +3,7 @@
 from asyncio import get_running_loop
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Literal, cast
+from typing import Literal, NotRequired, cast
 from uuid import UUID
 
 from langchain_core.tools import tool
@@ -43,6 +43,7 @@ _RETRIEVAL_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="kic-
 class AgentInput(TypedDict):
     incident: IncidentInput
     incident_id: UUID
+    classification_input: NotRequired[IncidentInput]
 
 
 class AgentOutput(TypedDict):
@@ -77,7 +78,10 @@ async def retrieve_tool(incident: IncidentInput, report: DiagnosisReport) -> Dia
 
 async def _classify(state: AgentState) -> dict[str, DiagnosisReport]:
     report = await classify_tool.ainvoke(
-        {"incident": state["incident"], "incident_id": state["incident_id"]}
+        {
+            "incident": state.get("classification_input", state["incident"]),
+            "incident_id": state["incident_id"],
+        }
     )
     return {"report": cast(DiagnosisReport, report)}
 
@@ -190,11 +194,17 @@ def build_agent_graph(
 AGENT_GRAPH = build_agent_graph()
 
 
-async def run_agent(incident: IncidentInput, *, incident_id: UUID) -> AgentDiagnosisReport:
+async def run_agent(
+    incident: IncidentInput,
+    *,
+    incident_id: UUID,
+    classification_input: IncidentInput | None = None,
+) -> AgentDiagnosisReport:
     context = AgentContext(model=read_model_config())
+    inputs: AgentInput = {"incident": incident, "incident_id": incident_id}
+    if classification_input is not None:
+        inputs["classification_input"] = classification_input
     # Incident input stays in request-local graph state and out of external traces.
     with tracing_context(enabled=False):
-        output = await AGENT_GRAPH.ainvoke(
-            {"incident": incident, "incident_id": incident_id}, context=context
-        )
+        output = await AGENT_GRAPH.ainvoke(inputs, context=context)
     return output["result"]

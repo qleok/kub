@@ -9,6 +9,11 @@ FailureType: TypeAlias = Literal["CrashLoopBackOff", "ImagePullBackOff", "OOMKil
 Severity: TypeAlias = Literal["medium", "high", "unknown"]
 Reason: TypeAlias = Annotated[str, StringConstraints(max_length=128)]
 LogLine: TypeAlias = Annotated[str, StringConstraints(max_length=4096)]
+_DNS_LABEL = r"[a-z0-9](?:[-a-z0-9]*[a-z0-9])?"
+DnsLabel: TypeAlias = Annotated[str, StringConstraints(max_length=63, pattern=f"^{_DNS_LABEL}$")]
+DnsSubdomain: TypeAlias = Annotated[
+    str, StringConstraints(max_length=253, pattern=rf"^{_DNS_LABEL}(?:\.{_DNS_LABEL})*$")
+]
 
 
 class PodEvent(BaseModel):
@@ -99,6 +104,26 @@ class AgentDetails(BaseModel):
 
 class AgentDiagnosisReport(DiagnosisReport):
     agent: AgentDetails
+
+
+class PodLookup(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    namespace: DnsLabel
+    pod_name: DnsSubdomain
+    container_name: DnsLabel | None = None
+
+
+class KubernetesDetails(BaseModel):
+    namespace: str
+    pod_name: str
+    container_name: str
+    events_status: Literal["ok", "unavailable"]
+    logs_status: Literal["ok", "unavailable"]
+
+
+class PodDiagnosisReport(AgentDiagnosisReport):
+    kubernetes: KubernetesDetails
 
 
 class HealthResponse(BaseModel):
