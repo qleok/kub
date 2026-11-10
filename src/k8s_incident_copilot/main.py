@@ -1,18 +1,20 @@
 """HTTP entry point for the diagnosis service."""
 
 from typing import Annotated, Literal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
+from anyio import to_thread
 from fastapi import FastAPI, HTTPException, Query
 
+from .agent import run_agent
 from .diagnosis import diagnose
 from .retrieval import augment
-from .schemas import DiagnosisReport, HealthResponse, IncidentInput
+from .schemas import AgentDiagnosisReport, DiagnosisReport, HealthResponse, IncidentInput
 
 app = FastAPI(
     title="K8s Incident Copilot",
-    description="Local Kubernetes incident diagnosis with optional documentation retrieval.",
-    version="0.2.0",
+    description="Local Kubernetes incident diagnosis with retrieval and a LangGraph agent.",
+    version="0.3.0",
 )
 
 
@@ -22,14 +24,24 @@ def health() -> HealthResponse:
 
 
 @app.post("/api/v1/diagnose")
-def create_diagnosis(
+async def create_diagnosis(
     incident: IncidentInput,
     mode: Annotated[
-        Literal["rules", "rag"],
-        Query(description="Use rules alone or enrich them with local Kubernetes documentation."),
+        Literal["rules", "rag", "agent"],
+        Query(description="Choose rules, retrieval enrichment, or the LangGraph agent."),
     ] = "rules",
+) -> AgentDiagnosisReport | DiagnosisReport:
+    incident_id = uuid4()
+    if mode == "agent":
+        return await run_agent(incident, incident_id=incident_id)
+
+    return await to_thread.run_sync(_diagnose_local, incident, incident_id, mode)
+
+
+def _diagnose_local(
+    incident: IncidentInput, incident_id: UUID, mode: Literal["rules", "rag"]
 ) -> DiagnosisReport:
-    report = diagnose(incident, incident_id=uuid4())
+    report = diagnose(incident, incident_id=incident_id)
     if mode == "rules":
         return report
 

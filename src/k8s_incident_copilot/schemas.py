@@ -80,5 +80,26 @@ class DiagnosisReport(BaseModel):
     diagnosis_method: Literal["rules", "rules+rag"] = "rules"
 
 
+AgentToolStatus: TypeAlias = Literal["ok", "skipped", "unavailable", "timed_out"]
+ModelStatus: TypeAlias = Literal[
+    "not_configured", "skipped", "used", "unavailable", "timed_out", "invalid_response"
+]
+
+
+class AgentToolRun(BaseModel):
+    name: Literal["classify", "retrieve"]
+    status: AgentToolStatus
+
+
+class AgentDetails(BaseModel):
+    tools: list[AgentToolRun]
+    model_status: ModelStatus
+    prioritized_steps: list[str]
+
+
+class AgentDiagnosisReport(DiagnosisReport):
+    agent: AgentDetails
+
+
 class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
